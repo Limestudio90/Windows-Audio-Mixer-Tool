@@ -1,0 +1,26 @@
+﻿<Window x:Class="WindowsAudioMixer.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:WindowsAudioMixer"
+        mc:Ignorable="d"
+        Title="Windows Audio Mixer" Height="600" Width="800">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        
+        <StackPanel x:Name="TopControlsPanel" Grid.Row="0" Orientation="Horizontal" Margin="10">
+            <TextBlock Text="Output Device:" VerticalAlignment="Center" Margin="0,0,10,0"/>
+            <ComboBox x:Name="OutputDevicesComboBox" Width="200" Margin="0,0,10,0" SelectionChanged="OutputDevicesComboBox_SelectionChanged"/>
+            <Button x:Name="RefreshButton" Content="Refresh" Click="RefreshButton_Click" Margin="10,0,0,0"/>
+            <Button x:Name="ThemeToggleButton" Content="Toggle Dark Theme" Click="ThemeToggleButton_Click" Margin="10,0,0,0"/>
+        </StackPanel>
+        
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel x:Name="AudioSessionsPanel" Margin="10"/>
+        </ScrollViewer>
+    </Grid>
+</Window>
