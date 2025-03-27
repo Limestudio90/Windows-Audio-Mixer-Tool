@@ -28,3 +28,4 @@ C:\Users\Utente\Desktop\Mixer\WindowsAudioMixer\obj\Debug\net9.0-windows\Windows
 C:\Users\Utente\Desktop\Mixer\WindowsAudioMixer\obj\Debug\net9.0-windows\WindowsAudioMixer.genruntimeconfig.cache
 C:\Users\Utente\Desktop\Mixer\WindowsAudioMixer\obj\Debug\net9.0-windows\ref\WindowsAudioMixer.dll
 C:\Users\Utente\Desktop\Mixer\WindowsAudioMixer\obj\Debug\net9.0-windows\Themes\DarkNeonTheme.baml
+C:\Users\Utente\Desktop\Mixer\WindowsAudioMixer\obj\Debug\net9.0-windows\WindowsAudioMixer.sourcelink.json

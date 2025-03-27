@@ -17,7 +17,8 @@ namespace WindowsAudioMixer
         private MMDeviceEnumerator deviceEnumerator;
         private Dictionary<string, MMDevice> audioDevices;
         private Dictionary<string, AudioSessionControl> audioSessions;
-
+        private Dictionary<string, float> discordVolumes = new Dictionary<string, float>(); // Per salvare i volumi di Discord
+        
         public MainWindow()
         {
             InitializeComponent();
@@ -88,8 +89,8 @@ namespace WindowsAudioMixer
             if (OutputDevicesComboBox.SelectedItem == null)
                 return;
                 
-            string selectedDeviceName = OutputDevicesComboBox.SelectedItem.ToString();
-            if (!audioDevices.ContainsKey(selectedDeviceName))
+            string? selectedDeviceName = OutputDevicesComboBox.SelectedItem.ToString();
+            if (string.IsNullOrEmpty(selectedDeviceName) || !audioDevices.ContainsKey(selectedDeviceName))
                 return;
                 
             MMDevice selectedDevice = audioDevices[selectedDeviceName];
@@ -116,6 +117,22 @@ namespace WindowsAudioMixer
             // Raccogli prima tutte le sessioni per poterle filtrare meglio
             var allSessions = new List<(AudioSessionControl Session, string Name, uint ProcessId)>();
             
+            // Cerca specificamente applicazioni problematiche come Discord
+            bool discordFound = false;
+            
+            // Aggiungi prima le applicazioni di sistema che vogliamo sempre mostrare
+            try
+            {
+                // Invece di creare un nuovo AudioSessionControl vuoto, gestiamo il volume master in modo diverso
+                // Non aggiungiamo una sessione ma un identificatore speciale
+                allSessions.Add((null, "Volume Master", 0));
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Errore nell'aggiunta del volume master: {ex.Message}");
+            }
+            
+            // Continua con l'enumerazione delle sessioni normali
             for (int i = 0; i < sessionEnumerator.Count; i++)
             {
                 var session = sessionEnumerator[i];
@@ -143,6 +160,115 @@ namespace WindowsAudioMixer
                 catch (Exception ex)
                 {
                     Console.WriteLine($"Error processing session: {ex.Message}");
+                }
+            }
+            
+            // Aggiungi ricerca specifica per Discord e altre app comuni
+            var specificApps = new[] { "Discord", "Spotify", "Teams", "Zoom" };
+            foreach (var appName in specificApps)
+            {
+                try
+                {
+                    // Per Discord, cerca tutti i processi correlati
+                    if (appName == "Discord")
+                    {
+                        var discordProcesses = System.Diagnostics.Process.GetProcessesByName("Discord");
+                        var discordPtbProcesses = System.Diagnostics.Process.GetProcessesByName("DiscordPTB");
+                        var discordCanaryProcesses = System.Diagnostics.Process.GetProcessesByName("DiscordCanary");
+                        
+                        var allDiscordProcesses = discordProcesses
+                            .Concat(discordPtbProcesses)
+                            .Concat(discordCanaryProcesses)
+                            .ToArray();
+                        
+                        Console.WriteLine($"Trovati {allDiscordProcesses.Length} processi Discord");
+                        
+                        if (allDiscordProcesses.Length > 0)
+                        {
+                            bool alreadyDetected = false;
+                            
+                            // Verifica se Discord è già stato rilevato
+                            foreach (var process in allDiscordProcesses)
+                            {
+                                if (allSessions.Any(s => s.ProcessId == process.Id))
+                                {
+                                    alreadyDetected = true;
+                                    break;
+                                }
+                            }
+                            
+                            if (!alreadyDetected)
+                            {
+                                // Cerca in tutti i dispositivi
+                                foreach (var device in audioDevices.Values)
+                                {
+                                    var deviceSessions = device.AudioSessionManager.Sessions;
+                                    for (int i = 0; i < deviceSessions.Count; i++)
+                                    {
+                                        try
+                                        {
+                                            var session = deviceSessions[i];
+                                            uint processId = session.GetProcessID;
+                                            
+                                            // Verifica se il processo è uno dei processi Discord
+                                            if (allDiscordProcesses.Any(p => p.Id == processId))
+                                            {
+                                                Console.WriteLine($"Trovata sessione specifica per Discord (PID: {processId})");
+                                                allSessions.Add((session, "Discord", processId));
+                                                discordFound = true;
+                                                break;
+                                            }
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            Console.WriteLine($"Errore nell'analisi della sessione di Discord: {ex.Message}");
+                                        }
+                                    }
+                                    
+                                    if (discordFound) break;
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // Gestione standard per altre app
+                        var processes = System.Diagnostics.Process.GetProcessesByName(appName);
+                        if (processes.Length > 0)
+                        {
+                            bool alreadyDetected = allSessions.Any(s => s.ProcessId == processes[0].Id);
+                            if (!alreadyDetected)
+                            {
+                                // Cerca in tutti i dispositivi
+                                foreach (var device in audioDevices.Values)
+                                {
+                                    var deviceSessions = device.AudioSessionManager.Sessions;
+                                    for (int i = 0; i < deviceSessions.Count; i++)
+                                    {
+                                        try
+                                        {
+                                            var session = deviceSessions[i];
+                                            if (session.GetProcessID == processes[0].Id)
+                                            {
+                                                Console.WriteLine($"Trovata sessione specifica per {appName}");
+                                                allSessions.Add((session, appName, (uint)processes[0].Id));
+                                                if (appName == "Discord") discordFound = true;
+                                                break;
+                                            }
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                            Console.WriteLine($"Errore nell'analisi della sessione di {appName}: {ex.Message}");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Errore nella ricerca di {appName}: {ex.Message}");
                 }
             }
             
@@ -354,11 +480,87 @@ namespace WindowsAudioMixer
                 Margin = new Thickness(0, 5, 0, 5)
             };
             
+            // Icona dell'applicazione (se disponibile)
+            try
+            {
+                System.Windows.Controls.Image appIcon = null;
+                
+                if (sessionName == "Volume Master")
+                {
+                    // Usa un'icona predefinita per il volume master
+                    appIcon = new System.Windows.Controls.Image
+                    {
+                        Width = 24,
+                        Height = 24,
+                        Margin = new Thickness(5, 0, 5, 0),
+                        Source = new BitmapImage(new Uri("pack://application:,,,/WindowsAudioMixer;component/Resources/volume.png", UriKind.Absolute))
+                    };
+                }
+                else if (session.GetProcessID > 0)
+                {
+                    // Prova a ottenere l'icona dal processo
+                    try
+                    {
+                        var process = System.Diagnostics.Process.GetProcessById((int)session.GetProcessID);
+                        if (!string.IsNullOrEmpty(process.MainModule.FileName))
+                        {
+                            using (Icon icon = System.Drawing.Icon.ExtractAssociatedIcon(process.MainModule.FileName))
+                            {
+                                if (icon != null)
+                                {
+                                    using (MemoryStream ms = new MemoryStream())
+                                    {
+                                        icon.ToBitmap().Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+                                        ms.Position = 0;
+                                        
+                                        BitmapImage bitmapImage = new BitmapImage();
+                                        bitmapImage.BeginInit();
+                                        bitmapImage.CacheOption = BitmapCacheOption.OnLoad;
+                                        bitmapImage.StreamSource = ms;
+                                        bitmapImage.EndInit();
+                                        
+                                        appIcon = new System.Windows.Controls.Image
+                                        {
+                                            Width = 24,
+                                            Height = 24,
+                                            Margin = new Thickness(5, 0, 5, 0),
+                                            Source = bitmapImage
+                                        };
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Errore nell'estrazione dell'icona: {ex.Message}");
+                    }
+                }
+                
+                // Se non è stato possibile ottenere un'icona, usa un'icona generica
+                if (appIcon == null)
+                {
+                    appIcon = new System.Windows.Controls.Image
+                    {
+                        Width = 24,
+                        Height = 24,
+                        Margin = new Thickness(5, 0, 5, 0),
+                        Source = new BitmapImage(new Uri("pack://application:,,,/WindowsAudioMixer;component/Resources/app.png", UriKind.Absolute))
+                    };
+                }
+                
+                panel.Children.Add(appIcon);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Errore nella creazione dell'icona: {ex.Message}");
+            }
+            
             // App name
             var nameTextBlock = new TextBlock
             {
                 Text = sessionName,
-                Width = 200,
+                Width = 180,
                 VerticalAlignment = VerticalAlignment.Center
             };
             panel.Children.Add(nameTextBlock);
@@ -369,45 +571,128 @@ namespace WindowsAudioMixer
                 Minimum = 0,
                 Maximum = 100,
                 Width = 200,
-                Value = session.SimpleAudioVolume.Volume * 100,
                 VerticalAlignment = VerticalAlignment.Center,
                 Tag = sessionName
             };
-            volumeSlider.ValueChanged += VolumeSlider_ValueChanged;
+            
+            // Gestione speciale per il volume master
+            if (sessionName == "Volume Master")
+            {
+                if (OutputDevicesComboBox.SelectedItem != null)
+                {
+                    string? selectedDeviceName = OutputDevicesComboBox.SelectedItem.ToString();
+                    if (!string.IsNullOrEmpty(selectedDeviceName) && audioDevices.ContainsKey(selectedDeviceName))
+                    {
+                        var device = audioDevices[selectedDeviceName];
+                        volumeSlider.Value = device.AudioEndpointVolume.MasterVolumeLevelScalar * 100;
+                        volumeSlider.ValueChanged += MasterVolumeSlider_ValueChanged;
+                    }
+                }
+            }
+            else
+            {
+                volumeSlider.Value = session.SimpleAudioVolume.Volume * 100;
+                volumeSlider.ValueChanged += VolumeSlider_ValueChanged;
+            }
+            
             panel.Children.Add(volumeSlider);
             
             // Mute button
             var muteButton = new CheckBox
             {
                 Content = "Mute",
-                IsChecked = session.SimpleAudioVolume.Mute,
-                Margin = new Thickness(10, 0, 0, 0),
-                VerticalAlignment = VerticalAlignment.Center,
-                Tag = sessionName
-            };
-            muteButton.Checked += MuteButton_CheckedChanged;
-            muteButton.Unchecked += MuteButton_CheckedChanged;
-            panel.Children.Add(muteButton);
-            
-            // Device selection
-            var deviceComboBox = new ComboBox
-            {
-                Width = 200,
                 Margin = new Thickness(10, 0, 0, 0),
                 VerticalAlignment = VerticalAlignment.Center,
                 Tag = sessionName
             };
             
-            foreach (var device in audioDevices)
+            // Gestione speciale per il volume master
+            if (sessionName == "Volume Master")
             {
-                deviceComboBox.Items.Add(device.Key);
+                if (OutputDevicesComboBox.SelectedItem != null)
+                {
+                    string? selectedDeviceName = OutputDevicesComboBox.SelectedItem.ToString();
+                    if (!string.IsNullOrEmpty(selectedDeviceName) && audioDevices.ContainsKey(selectedDeviceName))
+                    {
+                        var device = audioDevices[selectedDeviceName];
+                        muteButton.IsChecked = device.AudioEndpointVolume.Mute;
+                        muteButton.Checked += MasterMuteButton_CheckedChanged;
+                        muteButton.Unchecked += MasterMuteButton_CheckedChanged;
+                    }
+                }
+            }
+            else
+            {
+                muteButton.IsChecked = session.SimpleAudioVolume.Mute;
+                muteButton.Checked += MuteButton_CheckedChanged;
+                muteButton.Unchecked += MuteButton_CheckedChanged;
             }
             
-            deviceComboBox.SelectedItem = OutputDevicesComboBox.SelectedItem;
-            deviceComboBox.SelectionChanged += DeviceComboBox_SelectionChanged;
-            panel.Children.Add(deviceComboBox);
+            panel.Children.Add(muteButton);
+            
+            // Device selection (solo per le app, non per il volume master)
+            if (sessionName != "Volume Master")
+            {
+                var deviceComboBox = new ComboBox
+                {
+                    Width = 200,
+                    Margin = new Thickness(10, 0, 0, 0),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Tag = sessionName
+                };
+                
+                foreach (var device in audioDevices)
+                {
+                    deviceComboBox.Items.Add(device.Key);
+                }
+                
+                deviceComboBox.SelectedItem = OutputDevicesComboBox.SelectedItem;
+                deviceComboBox.SelectionChanged += DeviceComboBox_SelectionChanged;
+                panel.Children.Add(deviceComboBox);
+            }
             
             return panel;
+        }
+
+        private void MasterVolumeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            var slider = sender as Slider;
+            if (slider == null || slider.Tag == null)
+                return;
+                
+            string? tagValue = slider.Tag.ToString();
+            if (string.IsNullOrEmpty(tagValue) || tagValue != "Volume Master")
+                return;
+                
+            if (OutputDevicesComboBox.SelectedItem == null)
+                return;
+                
+            string selectedDeviceName = OutputDevicesComboBox.SelectedItem.ToString();
+            if (!audioDevices.ContainsKey(selectedDeviceName))
+                return;
+                
+            var device = audioDevices[selectedDeviceName];
+            device.AudioEndpointVolume.MasterVolumeLevelScalar = (float)(slider.Value / 100.0);
+        }
+
+        private void MasterMuteButton_CheckedChanged(object sender, RoutedEventArgs e)
+        {
+            var checkbox = sender as CheckBox;
+            if (checkbox == null || checkbox.Tag == null)
+                return;
+                
+            if (checkbox.Tag.ToString() != "Volume Master")
+                return;
+                
+            if (OutputDevicesComboBox.SelectedItem == null)
+                return;
+                
+            string selectedDeviceName = OutputDevicesComboBox.SelectedItem.ToString();
+            if (!audioDevices.ContainsKey(selectedDeviceName))
+                return;
+                
+            var device = audioDevices[selectedDeviceName];
+            device.AudioEndpointVolume.Mute = checkbox.IsChecked ?? false;
         }
 
         private void VolumeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -431,11 +716,107 @@ namespace WindowsAudioMixer
                 return;
                 
             string sessionName = checkbox.Tag.ToString();
-            if (!audioSessions.ContainsKey(sessionName))
+            if (string.IsNullOrEmpty(sessionName) || !audioSessions.ContainsKey(sessionName))
                 return;
                 
             var session = audioSessions[sessionName];
-            session.SimpleAudioVolume.Mute = checkbox.IsChecked ?? false;
+            
+            try
+            {
+                bool muteState = checkbox.IsChecked ?? false;
+                
+                // Gestione speciale per Discord
+                if (sessionName.Contains("Discord"))
+                {
+                    Console.WriteLine($"Applicando mute speciale per Discord: {muteState}");
+                    
+                    // Salva il volume corrente
+                    float currentVolume = session.SimpleAudioVolume.Volume;
+                    
+                    // Applica il mute
+                    session.SimpleAudioVolume.Mute = muteState;
+                    
+                    // Per Discord, imposta anche il volume a 0 quando è in mute
+                    if (muteState)
+                    {
+                        // Salva il volume attuale in una variabile di classe per ripristinarlo dopo
+                        if (!discordVolumes.ContainsKey(sessionName))
+                        {
+                            discordVolumes[sessionName] = currentVolume;
+                        }
+                        
+                        // Imposta il volume a 0
+                        session.SimpleAudioVolume.Volume = 0;
+                        
+                        // Riapplica il mute dopo un breve ritardo
+                        System.Threading.Tasks.Task.Delay(50).ContinueWith(t => 
+                        {
+                            Application.Current.Dispatcher.Invoke(() => 
+                            {
+                                try 
+                                {
+                                    session.SimpleAudioVolume.Mute = true;
+                                    session.SimpleAudioVolume.Volume = 0;
+                                    Console.WriteLine("Mute di Discord riapplicato con volume 0");
+                                }
+                                catch (Exception ex) 
+                                {
+                                    Console.WriteLine($"Errore nel riapplicare mute a Discord: {ex.Message}");
+                                }
+                            });
+                        });
+                    }
+                    else
+                    {
+                        // Ripristina il volume precedente quando si toglie il mute
+                        if (discordVolumes.ContainsKey(sessionName))
+                        {
+                            session.SimpleAudioVolume.Volume = discordVolumes[sessionName];
+                            discordVolumes.Remove(sessionName);
+                        }
+                        else
+                        {
+                            // Se non abbiamo salvato il volume, imposta un valore predefinito
+                            session.SimpleAudioVolume.Volume = 0.75f;
+                        }
+                        
+                        Console.WriteLine($"Discord unmute con volume ripristinato");
+                    }
+                }
+                else
+                {
+                    // Comportamento standard per altre app
+                    session.SimpleAudioVolume.Mute = muteState;
+                    
+                    // ... existing code for other apps ...
+                }
+            }
+            catch (COMException comEx)
+            {
+                Console.WriteLine($"Errore COM durante il mute di {sessionName}: {comEx.Message}");
+                
+                // Prova un approccio alternativo in caso di errore COM
+                try
+                {
+                    // Ricarica la sessione e riprova
+                    LoadAudioSessions();
+                    
+                    // Cerca di nuovo la sessione dopo il ricaricamento
+                    if (audioSessions.ContainsKey(sessionName))
+                    {
+                        audioSessions[sessionName].SimpleAudioVolume.Mute = checkbox.IsChecked ?? false;
+                        Console.WriteLine($"Mute applicato a {sessionName} dopo il ricaricamento");
+                    }
+                }
+                catch (Exception retryEx)
+                {
+                    Console.WriteLine($"Errore nel secondo tentativo di mute: {retryEx.Message}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Errore generico durante il mute di {sessionName}: {ex.Message}");
+            }
         }
 
         private void DeviceComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -449,7 +830,7 @@ namespace WindowsAudioMixer
             
             if (!audioSessions.ContainsKey(sessionName) || !audioDevices.ContainsKey(targetDeviceName))
                 return;
-                
+            
             // Note: Redirecting audio streams to different devices requires more complex API calls
             // This is a placeholder for that functionality
             MessageBox.Show($"Redirecting {sessionName} to {targetDeviceName} - This feature requires additional Windows API calls");
@@ -466,7 +847,21 @@ namespace WindowsAudioMixer
                         if (child is Slider slider && slider.Tag != null)
                         {
                             string sessionName = slider.Tag.ToString();
-                            if (audioSessions.ContainsKey(sessionName))
+                            
+                            // Gestione speciale per il volume master
+                            if (sessionName == "Volume Master")
+                            {
+                                if (OutputDevicesComboBox.SelectedItem != null)
+                                {
+                                    string selectedDeviceName = OutputDevicesComboBox.SelectedItem.ToString();
+                                    if (audioDevices.ContainsKey(selectedDeviceName))
+                                    {
+                                        var device = audioDevices[selectedDeviceName];
+                                        slider.Value = device.AudioEndpointVolume.MasterVolumeLevelScalar * 100;
+                                    }
+                                }
+                            }
+                            else if (audioSessions.ContainsKey(sessionName))
                             {
                                 var session = audioSessions[sessionName];
                                 slider.Value = session.SimpleAudioVolume.Volume * 100;
@@ -475,7 +870,21 @@ namespace WindowsAudioMixer
                         else if (child is CheckBox checkbox && checkbox.Tag != null)
                         {
                             string sessionName = checkbox.Tag.ToString();
-                            if (audioSessions.ContainsKey(sessionName))
+                            
+                            // Gestione speciale per il volume master
+                            if (sessionName == "Volume Master")
+                            {
+                                if (OutputDevicesComboBox.SelectedItem != null)
+                                {
+                                    string selectedDeviceName = OutputDevicesComboBox.SelectedItem.ToString();
+                                    if (audioDevices.ContainsKey(selectedDeviceName))
+                                    {
+                                        var device = audioDevices[selectedDeviceName];
+                                        checkbox.IsChecked = device.AudioEndpointVolume.Mute;
+                                    }
+                                }
+                            }
+                            else if (audioSessions.ContainsKey(sessionName))
                             {
                                 var session = audioSessions[sessionName];
                                 checkbox.IsChecked = session.SimpleAudioVolume.Mute;
@@ -586,4 +995,4 @@ namespace WindowsAudioMixer
             }
         }
     }
-}    
+}
