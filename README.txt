@@ -1,5 +1,5 @@
 
-![alt text](https://i.ibb.co/5h9ZKNtZ/immagine-2025-03-27-182955003.png)
+![screen shot](https://i.ibb.co/5h9ZKNtZ/immagine-2025-03-27-182955003.png)
 
 
 # Windows Audio Mixer - Istruzioni di Installazione
