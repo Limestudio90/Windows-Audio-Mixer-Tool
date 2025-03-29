@@ -7,8 +7,11 @@ using NAudio.CoreAudioApi;
 using NAudio.CoreAudioApi.Interfaces;
 using System.Runtime.InteropServices;
 using System.Windows.Media.Imaging;
+using System.Windows.Media;
 using System.Drawing;
 using System.IO;
+using MediaColor = System.Windows.Media.Color;
+using DrawingColor = System.Drawing.Color;
 
 namespace WindowsAudioMixer
 {
@@ -914,20 +917,52 @@ namespace WindowsAudioMixer
         
         private void ThemeToggleButton_Click(object sender, RoutedEventArgs e)
         {
-            // Revert to using the default light theme
+            // Check if we're currently using light theme
+            bool isCurrentlyLightTheme = this.Background is SolidColorBrush brush && 
+                                         brush.Color.Equals(Colors.White);
+            
+            // Clear current resources
             Application.Current.Resources.Clear();
             
-            // Apply basic light theme styles
-            var lightTheme = new ResourceDictionary();
-            lightTheme.Add("BackgroundBrush", new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.White));
-            lightTheme.Add("ForegroundBrush", new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.Black));
-            lightTheme.Add("AccentBrush", new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.DodgerBlue));
+            // Create a new resource dictionary
+            var themeResources = new ResourceDictionary();
             
-            Application.Current.Resources.MergedDictionaries.Add(lightTheme);
+            if (isCurrentlyLightTheme)
+            {
+                // Switch to dark theme
+                themeResources.Add("BackgroundBrush", new SolidColorBrush(MediaColor.FromRgb(32, 32, 32)));
+                themeResources.Add("ForegroundBrush", new SolidColorBrush(Colors.White));
+                themeResources.Add("AccentBrush", new SolidColorBrush(MediaColor.FromRgb(0, 120, 215)));
+                
+                // Update UI elements to use dark theme
+                this.Background = new SolidColorBrush(MediaColor.FromRgb(32, 32, 32));
+                this.Foreground = new SolidColorBrush(Colors.White);
+                
+                // Update button text
+                if (sender is Button button)
+                {
+                    button.Content = "Toggle Light Theme";
+                }
+            }
+            else
+            {
+                // Switch to light theme
+                themeResources.Add("BackgroundBrush", new SolidColorBrush(Colors.White));
+                themeResources.Add("ForegroundBrush", new SolidColorBrush(Colors.Black));
+                themeResources.Add("AccentBrush", new SolidColorBrush(Colors.DodgerBlue));
+                
+                // Update UI elements to use light theme
+                this.Background = new SolidColorBrush(Colors.White);
+                this.Foreground = new SolidColorBrush(Colors.Black);
+                
+                // Update button text
+                if (sender is Button button)
+                {
+                    button.Content = "Toggle Dark Theme";
+                }
+            }
             
-            // Update UI elements to use light theme
-            this.Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.White);
-            this.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.Black);
+            Application.Current.Resources.MergedDictionaries.Add(themeResources);
             
             // Refresh the UI to apply the theme
             LoadAudioSessions();
